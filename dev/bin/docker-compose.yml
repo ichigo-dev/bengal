@@ -1,0 +1,18 @@
+version: '3.7'
+
+services:
+
+  ##############################################################################
+  # rust
+  ##############################################################################
+  rust:
+    container_name: ${RUST_CONTAINER}
+    working_dir: ${CONTAINER_SRC_PATH}
+    build:
+      context: ./docker/rust
+      network: host
+    volumes:
+      - ${HOST_SRC_PATH}:${CONTAINER_SRC_PATH}
+      - ${HOST_TARGET_PATH}:${CONTAINER_TARGET_PATH}
+    tty:
+      true
