@@ -16,17 +16,21 @@
 
 */
 
+mod error;
 mod sender;
 mod receiver;
 
 use sender::Sender;
 use receiver::Receiver;
 
+use std::future::Future;
+use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::atomic::AtomicUsize;
+use std::task::{ Context, Poll };
 
 use concurrent_queue::ConcurrentQueue;
-use event_listener::Event;
+use event_listener::{ Event, EventListener };
 
 //------------------------------------------------------------------------------
 //  A channel through which messages are thrown from senders to receivers.
@@ -42,6 +46,9 @@ struct Channel<T>
     //  Event notified when a message is sent while the queue is empty.
     recv_event: Event,
 
+    //  Events used for stream control during message transmission.
+    stream_event: Event,
+
     //  Number of active senders.
     sender_count: AtomicUsize,
 
@@ -52,7 +59,7 @@ struct Channel<T>
 impl<T> Channel<T>
 {
     //--------------------------------------------------------------------------
-    //  Close channel manually.
+    //  Closes channel manually.
     //--------------------------------------------------------------------------
     pub fn close( &self ) -> bool
     {
@@ -82,9 +89,9 @@ pub fn bounded<T>( cap: usize ) -> (Sender<T>, Receiver<T>)
     let channel = Arc::new(Channel
     {
         queue: ConcurrentQueue::bounded(cap),
-        send_ops: Event::new(),
-        recv_ops: Event::new(),
-        stream_ops: Event::new(),
+        send_event: Event::new(),
+        recv_event: Event::new(),
+        stream_event: Event::new(),
         sender_count: AtomicUsize::new(1),
         receiver_count: AtomicUsize::new(1),
     });
@@ -106,16 +113,14 @@ pub fn bounded<T>( cap: usize ) -> (Sender<T>, Receiver<T>)
 //------------------------------------------------------------------------------
 //  Creates a sender-receiver pair that uses a unlimited capacity channel.
 //------------------------------------------------------------------------------
-pub fn bounded<T>( cap: usize ) -> (Sender<T>, Receiver<T>)
+pub fn unbounded<T>() -> (Sender<T>, Receiver<T>)
 {
-    assert!(cap > 0, "capacity cannot be zero");
-
     let channel = Arc::new(Channel
     {
-        queue: ConcurrentQueue::bounded(cap),
-        send_ops: Event::new(),
-        recv_ops: Event::new(),
-        stream_ops: Event::new(),
+        queue: ConcurrentQueue::unbounded(),
+        send_event: Event::new(),
+        recv_event: Event::new(),
+        stream_event: Event::new(),
         sender_count: AtomicUsize::new(1),
         receiver_count: AtomicUsize::new(1),
     });
@@ -135,56 +140,49 @@ pub fn bounded<T>( cap: usize ) -> (Sender<T>, Receiver<T>)
 }
 
 //------------------------------------------------------------------------------
-//
+//  A strategy used to poll an `EventListener`.
 //------------------------------------------------------------------------------
-pub fn unbounded<T>() -> (Sender<T>, Receiver<T>)
+pub trait Strategy
 {
-    let channel = Arc::new(Channel
-    {
-        queue: ConcurrentQueue::unbounded(),
-        send_ops: Event::new(),
-        recv_ops: Event::new(),
-        stream_ops: Event::new(),
-        sender_count: AtomicUsize::new(1),
-        receiver_count: AtomicUsize::new(1),
-    });
+    type Context;
 
-    let s = Sender
-    {
-        channel: channel.clone(),
-    };
-
-    let r = Receiver
-    {
-        channel,
-        listener: None,
-    };
-
-    (s, r)
+    fn poll( listener: EventListener, cx: &mut Self::Context )
+        -> Result<(), EventListener>;
 }
+
 //------------------------------------------------------------------------------
-pub fn unbounded<T>() -> (Sender<T>, Receiver<T>)
+//  Non blocking strategy for use in asynchronous code.
+//------------------------------------------------------------------------------
+struct NonBlocking<'a>(&'a mut ());
+
+impl<'a> Strategy for NonBlocking<'a>
 {
-    let channel = Arc::new(Channel
-    {
-        queue: ConcurrentQueue::unbounded(),
-        send_ops: Event::new(),
-        recv_ops: Event::new(),
-        stream_ops: Event::new(),
-        sender_count: AtomicUsize::new(1),
-        receiver_count: AtomicUsize::new(1),
-    });
+    type Context = Context<'a>;
 
-    let s = Sender
+    fn poll( mut listener: EventListener, cx: &mut Context<'a> )
+        -> Result<(), EventListener>
     {
-        channel: channel.clone(),
-    };
+        match Pin::new(&mut listener).poll(cx)
+        {
+            Poll::Ready(()) => Ok(()),
+            Poll::Pending => Err(listener),
+        }
+    }
+}
 
-    let r = Receiver
+//------------------------------------------------------------------------------
+//  Blocking strategy for use in synchronous code.
+//------------------------------------------------------------------------------
+struct Blocking;
+
+impl Strategy for Blocking
+{
+    type Context = ();
+
+    fn poll( listener: EventListener, _cx: &mut () )
+        -> Result<(), EventListener>
     {
-        channel,
-        listener: None,
-    };
-
-    (s, r)
+        listener.wait();
+        Ok(())
+    }
 }
