@@ -4,14 +4,16 @@
 
 */
 
-use crate::{ Channel, Strategy, Blocking };
+use crate::{ Channel, Strategy, Blocking, NonBlocking };
 use crate::error::{ SendError, TrySendError };
 
 use std::fmt;
+use std::future::Future;
+use std::pin::Pin;
 use std::process;
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
-use std::task::Poll;
+use std::task::{ Poll, Context };
 
 use concurrent_queue::PushError;
 use event_listener::EventListener;
@@ -239,4 +241,15 @@ impl<'a, T> Send<'a, T>
     }
 }
 
+impl<'a, T> Unpin for Send<'a, T> {}
 
+impl<'a, T> Future for Send<'a, T>
+{
+    type Output = Result<(), SendError<T>>;
+
+    fn poll( mut self: Pin<&mut Self>, cx: &mut Context<'_> )
+        -> Poll<Self::Output>
+    {
+        self.run::<NonBlocking<'_>>(cx)
+    }
+}
