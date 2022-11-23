@@ -3,4 +3,5 @@
 members = [
 	"bengal",
 	"bengal_channel",
+	"bengal_lock",
 ]
