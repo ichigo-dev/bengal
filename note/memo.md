@@ -19,3 +19,12 @@ One common example of a Stream is the Receiver for the channel type from the
 futures crate. It will yield Some(val) every time a value is sent from the 
 Sender end, and will yield None once the Sender has been dropped and all 
 pending messages have been received.
+
+
+## Fixed source
+
+bengal_lock/src/mutex.rs(line:35)
+```
+//	unsafe impl<T: Send + ?Sized> Sync for Mutex<T> {}
+unsafe impl<T: Sync + ?Sized> Sync for Mutex<T> {}
+```
