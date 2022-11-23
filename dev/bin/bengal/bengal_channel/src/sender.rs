@@ -116,6 +116,14 @@ impl<T> Sender<T>
     }
 
     //--------------------------------------------------------------------------
+    //  Returns the number of senders of the channel.
+    //--------------------------------------------------------------------------
+    pub fn sender_count( &self ) -> usize
+    {
+        self.channel.sender_count.load(Ordering::SeqCst)
+    }
+
+    //--------------------------------------------------------------------------
     //  Returns the number of receivers of the channel.
     //--------------------------------------------------------------------------
     pub fn receiver_count( &self ) -> usize
@@ -129,7 +137,7 @@ impl<T> fmt::Debug for Sender<T>
     //--------------------------------------------------------------------------
     //  Formats output when debugging.
     //--------------------------------------------------------------------------
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result
+    fn fmt( &self, f: &mut fmt::Formatter<'_> ) -> fmt::Result
     {
         write!(f, "Sender {{ .. }}")
     }
@@ -138,10 +146,10 @@ impl<T> fmt::Debug for Sender<T>
 impl<T> Drop for Sender<T>
 {
     //--------------------------------------------------------------------------
-    // Decrement the sender count and close the channel if it drops down to 
-    // zero.
+    //  Decrement the sender count and close the channel if it drops down to 
+    //  zero.
     //--------------------------------------------------------------------------
-    fn drop(&mut self)
+    fn drop( &mut self )
     {
         if self.channel.sender_count.fetch_sub(1, Ordering::AcqRel) == 1
         {
@@ -155,7 +163,7 @@ impl<T> Clone for Sender<T>
     //--------------------------------------------------------------------------
     //  Clones the sender.
     //--------------------------------------------------------------------------
-    fn clone(&self) -> Sender<T>
+    fn clone( &self ) -> Sender<T>
     {
         let count = self.channel.sender_count.fetch_add(1, Ordering::Relaxed);
 
@@ -172,7 +180,7 @@ impl<T> Clone for Sender<T>
 }
 
 //------------------------------------------------------------------------------
-//  A future returned by `Sender::send()`.
+//  A future in which the sender sends a message.
 //------------------------------------------------------------------------------
 #[derive(Debug)]
 #[must_use = "futures do nothing unless you `.await` or poll them"]
@@ -206,12 +214,12 @@ impl<'a, T> Send<'a, T>
                 Err(TrySendError::Full(m)) => self.msg = Some(m),
             }
 
-            //  Listen for event notifications if the message queue is full.
+            //  Listen for event notifications if the queue is full.
             match self.listener.take()
             {
                 None =>
                 {
-                    //  Set listener.
+                    //  Start listening and try sending the message again.
                     self.listener = Some(
                         self.sender.channel.send_event.listen()
                     );
@@ -247,6 +255,10 @@ impl<'a, T> Future for Send<'a, T>
 {
     type Output = Result<(), SendError<T>>;
 
+    //--------------------------------------------------------------------------
+    //  Attempts to resolve the future to a final value, registering the 
+    //  current task for wakeup if the value is not yet available.
+    //--------------------------------------------------------------------------
     fn poll( mut self: Pin<&mut Self>, cx: &mut Context<'_> )
         -> Poll<Self::Output>
     {

@@ -159,6 +159,10 @@ impl<'a> Strategy for NonBlocking<'a>
 {
     type Context = Context<'a>;
 
+    //--------------------------------------------------------------------------
+    //  Attempts to resolve the future to a final value, registering the 
+    //  current task for wakeup if the value is not yet available.
+    //--------------------------------------------------------------------------
     fn poll( mut listener: EventListener, cx: &mut Context<'a> )
         -> Result<(), EventListener>
     {
@@ -179,6 +183,10 @@ impl Strategy for Blocking
 {
     type Context = ();
 
+    //--------------------------------------------------------------------------
+    //  Attempts to resolve the future to a final value, registering the 
+    //  current task for wakeup if the value is not yet available.
+    //--------------------------------------------------------------------------
     fn poll( listener: EventListener, _cx: &mut () )
         -> Result<(), EventListener>
     {
