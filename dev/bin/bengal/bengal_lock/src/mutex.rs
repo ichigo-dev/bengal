@@ -24,6 +24,13 @@ use event_listener::Event;
 pub struct Mutex<T: ?Sized>
 {
     //  Current state of the mutex.
+    //
+    //  0: Locks can be acquired.
+    //  1: Now acquireing lock.
+    //  (The number of starved lock operations)
+    //  2: Locks can be acquired.
+    //  3 or more even numbers: Lock is available.
+    //  3 or more odd numbers: Lock is held by someone.
     state: AtomicUsize,
 
     //  Event notified when the mutex is unlocked.
@@ -146,8 +153,6 @@ impl<T: ?Sized> Mutex<T>
 
     //--------------------------------------------------------------------------
     //  Slow path for acquireing the mutex.
-    //
-    //  This method has a low probability of being called.
     //--------------------------------------------------------------------------
     #[cold]
     async fn acquire_slow( &self )
@@ -156,12 +161,14 @@ impl<T: ?Sized> Mutex<T>
         #[cfg(not(any(target_arch = "wasm32", target_arch = "wasm64")))]
         let start = Instant::now();
 
+        //  Repeat the attempt until a lock is obtained. If starvation has 
+        //  occurred due to other locking operations, proceed to the next step.
         loop
         {
             //  Start listening for events.
             let listener = self.lock_event.listen();
 
-            //  Starvation is the inability to acquire a lock on a mutex.
+            //  starvation means the number of missing lock operations.
             //  Try locking if nobody is being starved.
             match self
                 .state
@@ -171,7 +178,7 @@ impl<T: ?Sized> Mutex<T>
                 //  Lock acquired.
                 0 => return,
 
-                //  Lock is held and nobody is starved.
+                //  Lock is already held and nobody is starved.
                 1 => {},
 
                 //  Somebody is starved.
@@ -195,6 +202,8 @@ impl<T: ?Sized> Mutex<T>
                 //  Somebody is starved.
                 _ =>
                 {
+                    //  In this case, notificate event because starvation has 
+                    //  probably occurred.
                     self.lock_event.notify(1);
                     break;
                 },
